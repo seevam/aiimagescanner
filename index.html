@@ -299,16 +299,29 @@
     <script>
         let currentImage = null;
         
-        // Handle file upload
-        document.getElementById('imageInput').addEventListener('change', function(e) {
+        // Handle file upload with compression
+        document.getElementById('imageInput').addEventListener('change', async function(e) {
             const file = e.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    currentImage = e.target.result;
-                    displayImage(e.target.result);
-                };
-                reader.readAsDataURL(file);
+                // Check file size (max 20MB for OpenAI)
+                if (file.size > 20 * 1024 * 1024) {
+                    alert('Image too large! Please select an image smaller than 20MB.');
+                    return;
+                }
+
+                try {
+                    // Show loading state
+                    const previewSection = document.getElementById('previewSection');
+                    previewSection.innerHTML = '<div class="placeholder">Processing image...</div>';
+                    
+                    // Compress image for better performance and lower costs
+                    const compressedImage = await compressImage(file);
+                    currentImage = compressedImage;
+                    displayImage(compressedImage);
+                } catch (error) {
+                    console.error('Image processing error:', error);
+                    alert('Error processing image. Please try a different image.');
+                }
             }
         });
 
@@ -316,6 +329,12 @@
             const previewSection = document.getElementById('previewSection');
             previewSection.innerHTML = `<img src="${src}" alt="Uploaded image" class="preview-image">`;
         }
+
+        // Configuration - Replace with your actual API key
+        const CONFIG = {
+            OPENAI_API_KEY: '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', // Replace with your actual key
+            API_ENDPOINT: 'https://api.openai.com/v1/chat/completions'
+        };
 
         async function analyzeImage() {
             if (!currentImage) {
@@ -329,6 +348,11 @@
                 return;
             }
 
+            if (CONFIG.OPENAI_API_KEY === 'your-openai-api-key-here') {
+                alert('Please add your OpenAI API key to the CONFIG object in the code!');
+                return;
+            }
+
             const resultsSection = document.getElementById('resultsSection');
             const analysisResults = document.getElementById('analysisResults');
             const analyzeBtn = document.getElementById('analyzeBtn');
@@ -338,38 +362,107 @@
             analysisResults.innerHTML = `
                 <div class="loading">
                     <div class="spinner"></div>
-                    <span>Analyzing image with AI...</span>
+                    <span>Analyzing image with GPT-4 Vision...</span>
                 </div>
             `;
             analyzeBtn.disabled = true;
 
-            // Simulate AI analysis (in a real app, this would call an AI service)
-            setTimeout(() => {
-                const mockAnalysis = generateMockAnalysis(question);
-                analysisResults.innerHTML = `<div class="answer">${mockAnalysis}</div>`;
+            try {
+                const analysis = await callOpenAIVision(currentImage, question);
+                analysisResults.innerHTML = `<div class="answer">${analysis}</div>`;
+            } catch (error) {
+                console.error('Analysis error:', error);
+                analysisResults.innerHTML = `
+                    <div class="answer" style="color: #e74c3c;">
+                        <strong>Error:</strong> ${error.message}
+                        <br><br>
+                        <small>Common issues:</small>
+                        <ul style="margin-top: 10px;">
+                            <li>Invalid API key</li>
+                            <li>Rate limit exceeded</li>
+                            <li>Network connection issue</li>
+                            <li>Image too large (max 20MB)</li>
+                        </ul>
+                    </div>
+                `;
+            } finally {
                 analyzeBtn.disabled = false;
-            }, 2000);
+            }
         }
 
-        function generateMockAnalysis(question) {
-            // This is a mock function - in a real app, you'd integrate with actual AI services
-            const responses = {
-                'what': 'Based on the image analysis, I can see several objects and elements. The image appears to contain various visual components that I can identify and describe in detail.',
-                'describe': 'This image shows a composition with multiple visual elements. The lighting and composition suggest careful attention to detail, with various objects positioned throughout the frame.',
-                'color': 'The image features a diverse color palette with both warm and cool tones. The dominant colors appear to be well-balanced, creating visual harmony.',
-                'text': 'I can identify text elements in the image. The text appears to be clearly readable and positioned strategically within the composition.',
-                'object': 'Several distinct objects are visible in the image, each with unique characteristics and positioning that contributes to the overall composition.',
-                'people': 'If there are people in the image, I can analyze their positioning, activities, and interactions within the scene.',
-                'default': 'Based on your question about the image, I can provide detailed analysis of the visual content, including objects, composition, colors, and contextual information that relates to your specific inquiry.'
-            };
+        async function callOpenAIVision(imageBase64, question) {
+            const response = await fetch(CONFIG.API_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: "gpt-4o", // Using GPT-4o which has vision capabilities
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: question
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: {
+                                        url: imageBase64,
+                                        detail: "high" // Use "low" for faster/cheaper analysis
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens: 500,
+                    temperature: 0.7
+                })
+            });
 
-            const lowerQuestion = question.toLowerCase();
-            for (const keyword in responses) {
-                if (lowerQuestion.includes(keyword)) {
-                    return responses[keyword];
-                }
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
             }
-            return responses.default;
+
+            const data = await response.json();
+            
+            if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                throw new Error('Invalid response format from OpenAI API');
+            }
+
+            return data.choices[0].message.content;
+        }
+
+        // Image compression function to reduce API costs
+        function compressImage(file, maxWidth = 1024, quality = 0.8) {
+            return new Promise((resolve) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                
+                img.onload = () => {
+                    // Calculate new dimensions
+                    let { width, height } = img;
+                    
+                    if (width > maxWidth || height > maxWidth) {
+                        const ratio = Math.min(maxWidth / width, maxWidth / height);
+                        width *= ratio;
+                        height *= ratio;
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    
+                    // Draw and compress
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                
+                img.src = URL.createObjectURL(file);
+            });
         }
 
         // Handle drag and drop
