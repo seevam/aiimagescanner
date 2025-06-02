@@ -48,6 +48,24 @@
             font-size: 1.1rem;
         }
 
+        .api-key-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .api-key-input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-family: monospace;
+        }
+
         .main-content {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -226,6 +244,24 @@
             font-size: 0.9rem;
         }
 
+        .error-message {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
         @media (max-width: 768px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -244,12 +280,20 @@
             <p>Upload an image and ask questions to get AI-powered insights</p>
         </div>
 
+        <div class="api-key-section">
+            <h3>🔑 OpenAI API Key Required</h3>
+            <p>Enter your OpenAI API key to enable image analysis:</p>
+            <input type="password" class="api-key-input" id="apiKeyInput" 
+                   placeholder="sk-proj-...">
+            <div id="apiKeyStatus"></div>
+        </div>
+
         <div class="main-content">
             <div class="upload-section">
                 <div class="upload-area" onclick="document.getElementById('imageInput').click()">
                     <div class="upload-icon">📸</div>
                     <div class="upload-text">Click to upload an image</div>
-                    <div class="upload-subtext">Supports JPG, PNG, GIF, WebP</div>
+                    <div class="upload-subtext">Supports JPG, PNG, GIF, WebP (max 20MB)</div>
                 </div>
                 <input type="file" id="imageInput" class="file-input" accept="image/*">
             </div>
@@ -298,7 +342,25 @@
 
     <script>
         let currentImage = null;
+        let apiKey = '';
         
+        // API Key validation
+        document.getElementById('apiKeyInput').addEventListener('input', function(e) {
+            apiKey = e.target.value.trim();
+            const statusDiv = document.getElementById('apiKeyStatus');
+            
+            if (apiKey.length === 0) {
+                statusDiv.innerHTML = '';
+                return;
+            }
+            
+            if (apiKey.startsWith('sk-') && apiKey.length > 20) {
+                statusDiv.innerHTML = '<div class="success-message">✅ API key format looks correct</div>';
+            } else {
+                statusDiv.innerHTML = '<div class="error-message">⚠️ Invalid API key format. Should start with "sk-" and be much longer.</div>';
+            }
+        });
+
         // Handle file upload with compression
         document.getElementById('imageInput').addEventListener('change', async function(e) {
             const file = e.target.files[0];
@@ -330,13 +392,13 @@
             previewSection.innerHTML = `<img src="${src}" alt="Uploaded image" class="preview-image">`;
         }
 
-        // Configuration - Replace with your actual API key
-        const CONFIG = {
-            OPENAI_API_KEY: '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', // Replace with your actual key
-            API_ENDPOINT: 'https://api.openai.com/v1/chat/completions'
-        };
-
         async function analyzeImage() {
+            // Validate API key
+            if (!apiKey || !apiKey.startsWith('sk-')) {
+                alert('Please enter a valid OpenAI API key first!');
+                return;
+            }
+
             if (!currentImage) {
                 alert('Please upload an image first!');
                 return;
@@ -345,11 +407,6 @@
             const question = document.getElementById('questionInput').value.trim();
             if (!question) {
                 alert('Please enter a question about the image!');
-                return;
-            }
-
-            if (CONFIG.OPENAI_API_KEY === 'your-openai-api-key-here') {
-                alert('Please add your OpenAI API key to the CONFIG object in the code!');
                 return;
             }
 
@@ -372,16 +429,27 @@
                 analysisResults.innerHTML = `<div class="answer">${analysis}</div>`;
             } catch (error) {
                 console.error('Analysis error:', error);
+                let errorMessage = error.message;
+                
+                // Provide more helpful error messages
+                if (errorMessage.includes('Incorrect API key')) {
+                    errorMessage = 'Invalid API key. Please check your OpenAI API key.';
+                } else if (errorMessage.includes('quota')) {
+                    errorMessage = 'API quota exceeded. Please check your OpenAI billing.';
+                } else if (errorMessage.includes('rate limit')) {
+                    errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+                }
+                
                 analysisResults.innerHTML = `
                     <div class="answer" style="color: #e74c3c;">
-                        <strong>Error:</strong> ${error.message}
+                        <strong>Error:</strong> ${errorMessage}
                         <br><br>
-                        <small>Common issues:</small>
+                        <small>Common solutions:</small>
                         <ul style="margin-top: 10px;">
-                            <li>Invalid API key</li>
-                            <li>Rate limit exceeded</li>
-                            <li>Network connection issue</li>
-                            <li>Image too large (max 20MB)</li>
+                            <li>Verify your API key is correct and active</li>
+                            <li>Check your OpenAI account has sufficient credits</li>
+                            <li>Ensure you haven't exceeded rate limits</li>
+                            <li>Try with a smaller image (max 20MB)</li>
                         </ul>
                     </div>
                 `;
@@ -391,10 +459,10 @@
         }
 
         async function callOpenAIVision(imageBase64, question) {
-            const response = await fetch(CONFIG.API_ENDPOINT, {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${CONFIG.OPENAI_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
@@ -480,19 +548,31 @@
             uploadSection.style.background = '#f8f9fa';
         });
 
-        uploadSection.addEventListener('drop', (e) => {
+        uploadSection.addEventListener('drop', async (e) => {
             e.preventDefault();
             uploadSection.style.borderColor = '#ddd';
             uploadSection.style.background = '#f8f9fa';
             
             const files = e.dataTransfer.files;
             if (files.length > 0 && files[0].type.startsWith('image/')) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    currentImage = e.target.result;
-                    displayImage(e.target.result);
-                };
-                reader.readAsDataURL(files[0]);
+                const file = files[0];
+                
+                if (file.size > 20 * 1024 * 1024) {
+                    alert('Image too large! Please select an image smaller than 20MB.');
+                    return;
+                }
+
+                try {
+                    const previewSection = document.getElementById('previewSection');
+                    previewSection.innerHTML = '<div class="placeholder">Processing image...</div>';
+                    
+                    const compressedImage = await compressImage(file);
+                    currentImage = compressedImage;
+                    displayImage(compressedImage);
+                } catch (error) {
+                    console.error('Image processing error:', error);
+                    alert('Error processing image. Please try a different image.');
+                }
             }
         });
 
